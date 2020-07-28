@@ -238,7 +238,7 @@ func checkConnection(t *testing.T, options *k8s.KubectlOptions, client kubernete
 		Wait:    500 * time.Millisecond,
 	}
 	retry.RunWith(retrier, t, func(r *retry.R) {
-		output, err := helpers.RunKubectlAndGetOutputE(t, options, "exec", pods.Items[0].Name, "-c", "static-client", "--", "curl", "-vvvsf", "http://127.0.0.1:1234/")
+		output, err := helpers.RunKubectlAndGetOutputE(t, options, "exec", pods.Items[0].Name, "-c", "static-client", "--", "curl", "-vvvsSf", "http://127.0.0.1:1234/")
 		if expectSuccess {
 			require.NoError(r, err)
 			require.Contains(r, output, "hello world")
