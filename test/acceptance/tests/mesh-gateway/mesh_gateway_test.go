@@ -234,7 +234,7 @@ func checkConnection(t *testing.T, options *k8s.KubectlOptions, client kubernete
 	require.Len(t, pods.Items, 1, fmt.Sprintf("expected to find at least one static-client pod, but found %d", len(pods.Items)))
 
 	retrier := &retry.Timer{
-		Timeout: 20 * time.Second,
+		Timeout: 240 * time.Second,
 		Wait:    500 * time.Millisecond,
 	}
 	retry.RunWith(retrier, t, func(r *retry.R) {

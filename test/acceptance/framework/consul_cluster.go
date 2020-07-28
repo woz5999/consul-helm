@@ -5,9 +5,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gruntwork-io/gruntwork-cli/collections"
+	"github.com/gruntwork-io/terratest/modules/files"
+	ttesting "github.com/gruntwork-io/terratest/modules/testing"
+
+	"github.com/gruntwork-io/gruntwork-cli/errors"
 	"github.com/gruntwork-io/terratest/modules/helm"
 	"github.com/gruntwork-io/terratest/modules/k8s"
 	"github.com/gruntwork-io/terratest/modules/logger"
@@ -37,6 +43,7 @@ type HelmCluster struct {
 	helmOptions      *helm.Options
 	releaseName      string
 	kubernetesClient kubernetes.Interface
+	cleanupOnFailure bool
 }
 
 func NewHelmCluster(
@@ -66,6 +73,7 @@ func NewHelmCluster(
 		helmOptions:      opts,
 		releaseName:      releaseName,
 		kubernetesClient: ctx.KubernetesClient(t),
+		cleanupOnFailure: cfg.CleanupOnFailure,
 	}
 }
 
@@ -75,15 +83,147 @@ func (h *HelmCluster) Create(t *testing.T) {
 	// Make sure we delete the cluster if we receive an interrupt signal and
 	// register cleanup so that we delete the cluster when test finishes.
 	helpers.Cleanup(t, func() {
-		h.Destroy(t)
+		if !t.Failed() || h.cleanupOnFailure {
+			h.Destroy(t)
+		} else {
+			t.Log("skipping resource cleanup")
+		}
 	})
 
 	// Fail if there are any existing installations of the Helm chart.
 	h.checkForPriorInstallations(t)
 
-	helm.Install(t, h.helmOptions, helmChartPath, h.releaseName)
+	install(t, h.helmOptions, helmChartPath, h.releaseName)
 
 	helpers.WaitForAllPodsToBeReady(t, h.kubernetesClient, h.helmOptions.KubectlOptions.Namespace, fmt.Sprintf("release=%s", h.releaseName))
+}
+
+func install(t ttesting.TestingT, options *helm.Options, chart string, releaseName string) error {
+	// If the chart refers to a path, convert to absolute path. Otherwise, pass straight through as it may be a remote
+	// chart.
+	if files.FileExists(chart) {
+		absChartDir, err := filepath.Abs(chart)
+		if err != nil {
+			return errors.WithStackTrace(err)
+		}
+		chart = absChartDir
+	}
+
+	// Now call out to helm install to install the charts with the provided options
+	// Declare err here so that we can update args later
+	var err error
+	args := []string{}
+	args = append(args, getNamespaceArgs(options)...)
+	if options.Version != "" {
+		args = append(args, "--version", options.Version)
+	}
+	args, err = getValuesArgsE(t, options, args...)
+	if err != nil {
+		return err
+	}
+	args = append(args, "--timeout=15m", releaseName, chart)
+	_, err = helm.RunHelmCommandAndGetOutputE(t, options, "install", args...)
+	return err
+}
+
+func getValuesArgsE(t ttesting.TestingT, options *helm.Options, args ...string) ([]string, error) {
+	args = append(args, formatSetValuesAsArgs(options.SetValues, "--set")...)
+	args = append(args, formatSetValuesAsArgs(options.SetStrValues, "--set-string")...)
+
+	valuesFilesArgs, err := formatValuesFilesAsArgsE(t, options.ValuesFiles)
+	if err != nil {
+		return args, errors.WithStackTrace(err)
+	}
+	args = append(args, valuesFilesArgs...)
+
+	setFilesArgs, err := formatSetFilesAsArgsE(t, options.SetFiles)
+	if err != nil {
+		return args, errors.WithStackTrace(err)
+	}
+	args = append(args, setFilesArgs...)
+	return args, nil
+}
+
+func formatSetValuesAsArgs(setValues map[string]string, flag string) []string {
+	args := []string{}
+
+	// To make it easier to test, go through the keys in sorted order
+	keys := collections.Keys(setValues)
+	for _, key := range keys {
+		value := setValues[key]
+		argValue := fmt.Sprintf("%s=%s", key, value)
+		args = append(args, flag, argValue)
+	}
+
+	return args
+}
+
+// formatSetFilesAsArgs formats the given list of keys and file paths as command line args for helm to set from file
+// (e.g of the format --set-file key=path). This will fail the test if one of the paths do not exist or the absolute
+// path can not be determined.
+func formatSetFilesAsArgs(t ttesting.TestingT, setFiles map[string]string) []string {
+	args, err := formatSetFilesAsArgsE(t, setFiles)
+	require.NoError(t, err)
+	return args
+}
+
+// formatSetFilesAsArgsE formats the given list of keys and file paths as command line args for helm to set from file
+// (e.g of the format --set-file key=path)
+func formatSetFilesAsArgsE(t ttesting.TestingT, setFiles map[string]string) ([]string, error) {
+	args := []string{}
+
+	// To make it easier to test, go through the keys in sorted order
+	keys := collections.Keys(setFiles)
+	for _, key := range keys {
+		setFilePath := setFiles[key]
+		// Pass through filepath.Abs to clean the path, and then make sure this file exists
+		absSetFilePath, err := filepath.Abs(setFilePath)
+		if err != nil {
+			return args, errors.WithStackTrace(err)
+		}
+		if !files.FileExists(absSetFilePath) {
+			return args, errors.WithStackTrace(helm.SetFileNotFoundError{setFilePath})
+		}
+		argValue := fmt.Sprintf("%s=%s", key, absSetFilePath)
+		args = append(args, "--set-file", argValue)
+	}
+
+	return args, nil
+}
+
+// formatValuesFilesAsArgs formats the given list of values file paths as command line args for helm (e.g of the format
+// -f path). This will fail the test if one of the paths do not exist or the absolute path can not be determined.
+func formatValuesFilesAsArgs(t ttesting.TestingT, valuesFiles []string) []string {
+	args, err := formatValuesFilesAsArgsE(t, valuesFiles)
+	require.NoError(t, err)
+	return args
+}
+
+// formatValuesFilesAsArgsE formats the given list of values file paths as command line args for helm (e.g of the format
+// -f path). This will error if the file does not exist.
+func formatValuesFilesAsArgsE(t ttesting.TestingT, valuesFiles []string) ([]string, error) {
+	args := []string{}
+
+	for _, valuesFilePath := range valuesFiles {
+		// Pass through filepath.Abs to clean the path, and then make sure this file exists
+		absValuesFilePath, err := filepath.Abs(valuesFilePath)
+		if err != nil {
+			return args, errors.WithStackTrace(err)
+		}
+		if !files.FileExists(absValuesFilePath) {
+			return args, errors.WithStackTrace(helm.ValuesFileNotFoundError{valuesFilePath})
+		}
+		args = append(args, "-f", absValuesFilePath)
+	}
+
+	return args, nil
+}
+
+func getNamespaceArgs(options *helm.Options) []string {
+	if options.KubectlOptions != nil && options.KubectlOptions.Namespace != "" {
+		return []string{"--namespace", options.KubectlOptions.Namespace}
+	}
+	return []string{}
 }
 
 func (h *HelmCluster) Destroy(t *testing.T) {
@@ -100,6 +240,16 @@ func (h *HelmCluster) Destroy(t *testing.T) {
 	for _, secret := range secrets.Items {
 		if strings.Contains(secret.Name, h.releaseName) {
 			err := h.kubernetesClient.CoreV1().Secrets(h.helmOptions.KubectlOptions.Namespace).Delete(secret.Name, nil)
+			require.NoError(t, err)
+		}
+	}
+
+	// delete any serviceaccounts that have h.releaseName in their name
+	sas, err := h.kubernetesClient.CoreV1().ServiceAccounts(h.helmOptions.KubectlOptions.Namespace).List(metav1.ListOptions{})
+	require.NoError(t, err)
+	for _, sa := range sas.Items {
+		if strings.Contains(sa.Name, h.releaseName) {
+			err := h.kubernetesClient.CoreV1().ServiceAccounts(h.helmOptions.KubectlOptions.Namespace).Delete(sa.Name, nil)
 			require.NoError(t, err)
 		}
 	}

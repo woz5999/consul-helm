@@ -13,6 +13,8 @@ type TestConfig struct {
 
 	ConsulImage    string
 	ConsulK8SImage string
+
+	CleanupOnFailure bool
 }
 
 // HelmValuesFromConfig returns a map of Helm values
