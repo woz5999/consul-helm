@@ -28,7 +28,7 @@ func TestConnectInjectDefault(t *testing.T) {
 	consulCluster.Create(t)
 
 	t.Log("creating static-server and static-client deployments")
-	createServerAndClient(t, suite.Config(), env.DefaultContext(t).KubectlOptions())
+	createServerAndClient(t, suite.Config(), env.DefaultContext(t))
 
 	t.Log("checking that connection is successful")
 	checkConnection(t, env.DefaultContext(t).KubectlOptions(), env.DefaultContext(t).KubernetesClient(t), true)
@@ -51,7 +51,7 @@ func TestConnectInjectSecure(t *testing.T) {
 	consulCluster.Create(t)
 
 	t.Log("creating static-server and static-client deployments")
-	createServerAndClient(t, suite.Config(), env.DefaultContext(t).KubectlOptions())
+	createServerAndClient(t, suite.Config(), env.DefaultContext(t))
 
 	t.Log("checking that the connection is not successful because there's no intention")
 	checkConnection(t, env.DefaultContext(t).KubectlOptions(), env.DefaultContext(t).KubernetesClient(t), false)
@@ -72,22 +72,24 @@ func TestConnectInjectSecure(t *testing.T) {
 
 // createServerAndClient sets up static-server and static-client
 // deployments that will be talking to each other over Connect.
-func createServerAndClient(t *testing.T, cfg *framework.TestConfig, options *k8s.KubectlOptions) {
-	helpers.KubectlApply(t, options, "fixtures/static-server.yaml")
-	helpers.KubectlApply(t, options, "fixtures/static-client.yaml")
+func createServerAndClient(t *testing.T, cfg *framework.TestConfig, context framework.TestContext) {
+	helpers.KubectlApply(t, context.KubectlOptions(), "fixtures/static-server.yaml")
+	helpers.KubectlApply(t, context.KubectlOptions(), "fixtures/static-client.yaml")
 
 	helpers.Cleanup(t, cfg.NoCleanupOnFailure, func() {
+		helpers.WritePodsDebugInfoIfFailed(t, context.KubernetesClient(t), context.KubectlOptions(), context.Name(), cfg.DebugDirectory, "app=static-server")
+		helpers.WritePodsDebugInfoIfFailed(t, context.KubernetesClient(t), context.KubectlOptions(), context.Name(), cfg.DebugDirectory, "app=static-client")
 		// Note: this delete command won't wait for pods to be fully terminated.
 		// This shouldn't cause any test pollution because the underlying
 		// objects are deployments, and so when other tests create these
 		// they should have different pod names.
-		helpers.KubectlDelete(t, options, "fixtures/static-server.yaml")
-		helpers.KubectlDelete(t, options, "fixtures/static-client.yaml")
+		helpers.KubectlDelete(t, context.KubectlOptions(), "fixtures/static-server.yaml")
+		helpers.KubectlDelete(t, context.KubectlOptions(), "fixtures/static-client.yaml")
 	})
 
 	// Wait for both deployments
-	helpers.RunKubectl(t, options, "wait", "--for=condition=available", "deploy/static-server")
-	helpers.RunKubectl(t, options, "wait", "--for=condition=available", "deploy/static-client")
+	helpers.RunKubectl(t, context.KubectlOptions(), "wait", "--for=condition=available", "deploy/static-server")
+	helpers.RunKubectl(t, context.KubectlOptions(), "wait", "--for=condition=available", "deploy/static-client")
 }
 
 // checkConnection checks if static-client can talk to static-server.

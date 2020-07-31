@@ -24,6 +24,7 @@ type TestEnvironment interface {
 // TestContext represents a specific context a test needs,
 // for example, information about a specific Kubernetes cluster.
 type TestContext interface {
+	Name() string
 	KubectlOptions() *k8s.KubectlOptions
 	KubernetesClient(t *testing.T) kubernetes.Interface
 }
@@ -33,7 +34,7 @@ type kubernetesEnvironment struct {
 }
 
 func newKubernetesEnvironmentFromConfig(config *TestConfig) *kubernetesEnvironment {
-	defaultContext := NewContext(config.KubeNamespace, config.Kubeconfig, config.KubeContext)
+	defaultContext := NewContext(DefaultContextName, config.KubeNamespace, config.Kubeconfig, config.KubeContext)
 
 	// Create a kubernetes environment with default context.
 	kenv := &kubernetesEnvironment{
@@ -44,7 +45,7 @@ func newKubernetesEnvironmentFromConfig(config *TestConfig) *kubernetesEnvironme
 
 	// Add secondary context if multi cluster tests are enabled.
 	if config.EnableMultiCluster {
-		kenv.contexts[SecondaryContextName] = NewContext(config.SecondaryKubeNamespace, config.SecondaryKubeconfig, config.SecondaryKubeContext)
+		kenv.contexts[SecondaryContextName] = NewContext(SecondaryContextName, config.SecondaryKubeNamespace, config.SecondaryKubeconfig, config.SecondaryKubeContext)
 	}
 
 	return kenv
@@ -65,15 +66,24 @@ func (k *kubernetesEnvironment) DefaultContext(t *testing.T) TestContext {
 }
 
 type kubernetesContext struct {
+	name string
+
 	pathToKubeConfig string
-	contextName      string
+	kubeContextName  string
 	namespace        string
-	client           kubernetes.Interface
+
+	client kubernetes.Interface
+
+	logDirectory string
+}
+
+func (k kubernetesContext) Name() string {
+	return k.name
 }
 
 func (k kubernetesContext) KubectlOptions() *k8s.KubectlOptions {
 	return &k8s.KubectlOptions{
-		ContextName: k.contextName,
+		ContextName: k.kubeContextName,
 		ConfigPath:  k.pathToKubeConfig,
 		Namespace:   k.namespace,
 	}
@@ -87,7 +97,7 @@ func (k kubernetesContext) KubernetesClient(t *testing.T) kubernetes.Interface {
 	configPath, err := k.KubectlOptions().GetConfigPath(t)
 	require.NoError(t, err)
 
-	config, err := k8s.LoadApiClientConfigE(configPath, k.contextName)
+	config, err := k8s.LoadApiClientConfigE(configPath, k.kubeContextName)
 	require.NoError(t, err)
 
 	client, err := kubernetes.NewForConfig(config)
@@ -98,10 +108,11 @@ func (k kubernetesContext) KubernetesClient(t *testing.T) kubernetes.Interface {
 	return client
 }
 
-func NewContext(namespace, pathToKubeConfig, contextName string) *kubernetesContext {
+func NewContext(name, namespace, pathToKubeConfig, kubeContextName string) *kubernetesContext {
 	return &kubernetesContext{
+		name:             name,
 		namespace:        namespace,
 		pathToKubeConfig: pathToKubeConfig,
-		contextName:      contextName,
+		kubeContextName:  kubeContextName,
 	}
 }

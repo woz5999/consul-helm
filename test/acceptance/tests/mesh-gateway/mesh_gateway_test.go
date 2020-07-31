@@ -90,13 +90,14 @@ func TestMeshGatewayDefault(t *testing.T) {
 
 	// Check that we can connect services over the mesh gateways
 	t.Log("creating static-server in dc2")
-	createServer(t, suite.Config(), secondaryContext.KubectlOptions())
+	createServer(t, suite.Config(), secondaryContext)
 
 	t.Log("creating static-client in dc1")
-	createClient(t, suite.Config(), primaryContext.KubectlOptions())
+	createClient(t, suite.Config(), primaryContext)
 
 	t.Log("checking that connection is successful")
 	checkConnection(t, primaryContext.KubectlOptions(), primaryContext.KubernetesClient(t), true)
+	t.FailNow()
 }
 
 // Test that Connect and wan federation over mesh gateways work in a secure installation,
@@ -199,10 +200,10 @@ func TestMeshGatewaySecure(t *testing.T) {
 
 			// Check that we can connect services over the mesh gateways
 			t.Log("creating static-server in dc2")
-			createServer(t, suite.Config(), secondaryContext.KubectlOptions())
+			createServer(t, suite.Config(), secondaryContext)
 
 			t.Log("creating static-client in dc1")
-			createClient(t, suite.Config(), primaryContext.KubectlOptions())
+			createClient(t, suite.Config(), primaryContext)
 
 			t.Log("creating intention")
 			_, _, err = consulClient.Connect().IntentionCreate(&api.Intention{
@@ -219,35 +220,37 @@ func TestMeshGatewaySecure(t *testing.T) {
 }
 
 // createServer sets up static-server deployment
-func createServer(t *testing.T, cfg *framework.TestConfig, options *k8s.KubectlOptions) {
-	helpers.KubectlApply(t, options, "fixtures/static-server.yaml")
+func createServer(t *testing.T, cfg *framework.TestConfig, context framework.TestContext) {
+	helpers.KubectlApply(t, context.KubectlOptions(), "fixtures/static-server.yaml")
 
 	helpers.Cleanup(t, cfg.NoCleanupOnFailure, func() {
+		helpers.WritePodsDebugInfoIfFailed(t, context.KubernetesClient(t), context.KubectlOptions(), context.Name(), cfg.DebugDirectory, "app=static-server")
 		// Note: this delete command won't wait for pods to be fully terminated.
 		// This shouldn't cause any test pollution because the underlying
 		// objects are deployments, and so when other tests create these
 		// they should have different pod names.
-		helpers.KubectlDelete(t, options, "fixtures/static-server.yaml")
+		helpers.KubectlDelete(t, context.KubectlOptions(), "fixtures/static-server.yaml")
 	})
 
 	// Wait for both deployments
-	helpers.RunKubectl(t, options, "wait", "--for=condition=available", "deploy/static-server")
+	helpers.RunKubectl(t, context.KubectlOptions(), "wait", "--for=condition=available", "deploy/static-server")
 }
 
 // createServer sets up static-client deployment
-func createClient(t *testing.T, cfg *framework.TestConfig, options *k8s.KubectlOptions) {
-	helpers.KubectlApply(t, options, "fixtures/static-client.yaml")
+func createClient(t *testing.T, cfg *framework.TestConfig, context framework.TestContext) {
+	helpers.KubectlApply(t, context.KubectlOptions(), "fixtures/static-client.yaml")
 
 	helpers.Cleanup(t, cfg.NoCleanupOnFailure, func() {
+		helpers.WritePodsDebugInfoIfFailed(t, context.KubernetesClient(t), context.KubectlOptions(), context.Name(), cfg.DebugDirectory, "app=static-client")
 		// Note: this delete command won't wait for pods to be fully terminated.
 		// This shouldn't cause any test pollution because the underlying
 		// objects are deployments, and so when other tests create these
 		// they should have different pod names.
-		helpers.KubectlDelete(t, options, "fixtures/static-client.yaml")
+		helpers.KubectlDelete(t, context.KubectlOptions(), "fixtures/static-client.yaml")
 	})
 
 	// Wait for both deployments
-	helpers.RunKubectl(t, options, "wait", "--for=condition=available", "deploy/static-client")
+	helpers.RunKubectl(t, context.KubectlOptions(), "wait", "--for=condition=available", "deploy/static-client")
 }
 
 // checkConnection checks if static-client can talk to static-server.

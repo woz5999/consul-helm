@@ -2,13 +2,17 @@ package helpers
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/gruntwork-io/terratest/modules/k8s"
+	"github.com/gruntwork-io/terratest/modules/logger"
 	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/hashicorp/consul/sdk/testutil/retry"
 	"github.com/stretchr/testify/require"
@@ -90,4 +94,38 @@ func Cleanup(t *testing.T, noCleanupOnFailure bool, cleanup func()) {
 	}
 
 	t.Cleanup(wrappedCleanupFunc)
+}
+
+// todo: docs
+func WritePodsDebugInfoIfFailed(t *testing.T, client kubernetes.Interface, kubectlOptions *k8s.KubectlOptions, clusterName, debugDirectory, labelSelector string) {
+	t.Helper()
+
+	if t.Failed() {
+		// Create a directory for the test
+		testDebugDirectory := filepath.Join(debugDirectory, t.Name(), clusterName)
+		require.NoError(t, os.MkdirAll(testDebugDirectory, 0755))
+
+		t.Logf("dumping logs and pod info for %s to %s", labelSelector, testDebugDirectory)
+
+		pods, err := client.CoreV1().Pods(kubectlOptions.Namespace).List(metav1.ListOptions{LabelSelector: labelSelector})
+		require.NoError(t, err)
+
+		for _, pod := range pods.Items {
+			// Get logs for each pod, passing the discard logger to make sure secrets aren't printed to test logs.
+			logs, err := RunKubectlAndGetOutputWithLoggerE(t, kubectlOptions, logger.Discard, "logs", "--all-containers=true", pod.Name)
+			require.NoError(t, err)
+
+			// Write logs to file name <pod.Name>.log
+			logFilename := filepath.Join(testDebugDirectory, fmt.Sprintf("%s.log", pod.Name))
+			require.NoError(t, ioutil.WriteFile(logFilename, []byte(logs), 0600))
+
+			// Describe pod
+			desc, err := RunKubectlAndGetOutputWithLoggerE(t, kubectlOptions, logger.Discard, "describe", "pod", pod.Name)
+			require.NoError(t, err)
+
+			// Write pod info to file name <pod.Name>.txt
+			descFilename := filepath.Join(testDebugDirectory, fmt.Sprintf("%s.txt", pod.Name))
+			require.NoError(t, ioutil.WriteFile(descFilename, []byte(desc), 0600))
+		}
+	}
 }
