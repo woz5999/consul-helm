@@ -280,6 +280,41 @@ load _helpers
 }
 
 #--------------------------------------------------------------------
+# hostVolumes
+
+@test "server/StatefulSet: adds host volume" {
+  cd `chart_dir`
+
+  # Test that it defines it
+  local object=$(helm template \
+      -s templates/server-statefulset.yaml  \
+      --set 'server.hostVolumes[0].name=foo' \
+      --set 'server.hostVolumes[0].path=/bar' \
+      . | tee /dev/stderr |
+      yq -r '.spec.template.spec.volumes[] | select(.name == "hostvolume-foo")' | tee /dev/stderr)
+
+  local actual=$(echo $object |
+      yq -r '.hostPath.path' | tee /dev/stderr)
+  [ "${actual}" = "/bar" ]
+
+  # Test that it mounts it
+  local object=$(helm template \
+      -s templates/server-statefulset.yaml  \
+      --set 'server.hostVolumes[0].name=foo' \
+      --set 'server.hostVolumes[0].path=/bar' \
+      . | tee /dev/stderr |
+      yq -r '.spec.template.spec.containers[0].volumeMounts[] | select(.name == "hostvolume-foo")' | tee /dev/stderr)
+
+  local actual=$(echo $object |
+      yq -r '.readOnly' | tee /dev/stderr)
+  [ "${actual}" = "true" ]
+
+  local actual=$(echo $object |
+      yq -r '.mountPath' | tee /dev/stderr)
+  [ "${actual}" = "/hostvolumes/foo" ]
+}
+
+#--------------------------------------------------------------------
 # affinity
 
 @test "server/StatefulSet: affinity not set with server.affinity=null" {

@@ -464,6 +464,13 @@ client:
     #   name: my-secret
     #   load: false # if true, will add to `-config-dir` to load by Consul
 
+  # hostVolumes is a list of volumes to mount from the host. These will be
+  # mounted to the container path `/hostvolumes/<name>/`. The value below is
+  # an array of objects, examples are shown below.
+  extraVolumes: []
+    # - name: my-volume
+    #   path: /var/run/my-dir # will mount this host path at /hostvolumes/my-volume
+
   # Toleration Settings for Client pods
   # This should be a multi-line string matching the Toleration array
   # in a PodSpec.

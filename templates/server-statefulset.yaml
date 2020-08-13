@@ -97,6 +97,11 @@ spec:
             {{- end }}
             {{- end }}
         {{- end }}
+        {{- range .Values.server.hostVolumes }}
+        - name: hostvolume-{{ .name }}
+          hostPath:
+            path: {{.path}}
+        {{- end }}
       {{- if .Values.server.priorityClassName }}
       priorityClassName: {{ .Values.server.priorityClassName | quote }}
       {{- end }}
@@ -209,6 +214,11 @@ spec:
             - name: userconfig-{{ .name }}
               readOnly: true
               mountPath: /consul/userconfig/{{ .name }}
+            {{- end }}
+            {{- range .Values.server.hostVolumes }}
+            - name: hostvolume-{{ .name }}
+              readOnly: true
+              mountPath: /hostvolumes/{{ .name }}
             {{- end }}
           lifecycle:
             preStop:
